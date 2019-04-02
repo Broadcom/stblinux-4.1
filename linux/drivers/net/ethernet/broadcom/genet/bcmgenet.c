@@ -3464,12 +3464,6 @@ static int bcmgenet_open(struct net_device *dev)
 
 	bcmgenet_set_hw_addr(priv, dev->dev_addr);
 
-	if (priv->internal_phy) {
-		reg = bcmgenet_ext_readl(priv, EXT_EXT_PWR_MGMT);
-		reg |= EXT_ENERGY_DET_MASK;
-		bcmgenet_ext_writel(priv, reg, EXT_EXT_PWR_MGMT);
-	}
-
 	/* Disable RX/TX DMA and flush TX queues */
 	dma_ctrl = bcmgenet_dma_disable(priv);
 
@@ -4163,7 +4157,7 @@ static int bcmgenet_resume(struct device *d)
 	struct net_device *dev = dev_get_drvdata(d);
 	struct bcmgenet_priv *priv = netdev_priv(dev);
 	unsigned long dma_ctrl;
-	u32 reg, offset;
+	u32 offset;
 	int ret;
 
 	if (!netif_running(dev))
@@ -4177,7 +4171,8 @@ static int bcmgenet_resume(struct device *d)
 	/* From WOL-enabled suspend, switch to regular clock */
 	if (device_may_wakeup(d) && priv->wolopts)
 		bcmgenet_power_up(priv, GENET_POWER_WOL_MAGIC);
-	else if (priv->internal_phy)
+
+	if (priv->internal_phy)
 		/* If this is an internal GPHY, power it back on now, before
 		 * UniMAC is brought out of reset as absolutely no UniMAC
 		 * activity is allowed
@@ -4193,12 +4188,6 @@ static int bcmgenet_resume(struct device *d)
 	bcmgenet_mii_config(priv->dev, false);
 
 	bcmgenet_set_hw_addr(priv, dev->dev_addr);
-
-	if (priv->internal_phy) {
-		reg = bcmgenet_ext_readl(priv, EXT_EXT_PWR_MGMT);
-		reg |= EXT_ENERGY_DET_MASK;
-		bcmgenet_ext_writel(priv, reg, EXT_EXT_PWR_MGMT);
-	}
 
 	offset = HFB_FLT_ENABLE_V3PLUS;
 	bcmgenet_hfb_reg_writel(priv, priv->hfb_en[1], offset);

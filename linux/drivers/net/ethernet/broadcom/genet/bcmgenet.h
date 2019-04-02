@@ -16,6 +16,7 @@
 #include <linux/mii.h>
 #include <linux/if_vlan.h>
 #include <linux/phy.h>
+#include <linux/ethtool.h>
 
 /* total number of Buffer Descriptors, same for Rx/Tx */
 #define TOTAL_DESC				256
@@ -688,7 +689,9 @@ struct bcmgenet_priv {
 	struct clk *clk_mux;
 	struct clk *clk_wol;
 	u32 wolopts;
+	u8 sopass[SOPASS_MAX];
 	u32 hfb_en[3];
+	bool wol_active;
 
 	struct bcmgenet_mib_counters mib;
 

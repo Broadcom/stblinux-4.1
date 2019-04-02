@@ -23,6 +23,12 @@ struct psci_power_state {
 	u8	affinity_level;
 };
 
+enum psci_conduit {
+	PSCI_CONDUIT_NONE,
+	PSCI_CONDUIT_SMC,
+	PSCI_CONDUIT_HVC,
+};
+
 struct psci_operations {
 	int (*cpu_suspend)(struct psci_power_state state,
 			   unsigned long entry_point);
@@ -32,17 +38,21 @@ struct psci_operations {
 	int (*affinity_info)(unsigned long target_affinity,
 			unsigned long lowest_affinity_level);
 	int (*migrate_info_type)(void);
+	enum psci_conduit conduit;
 };
 
 extern struct psci_operations psci_ops;
 extern struct smp_operations psci_smp_ops;
 
-#if defined(CONFIG_SMP) && defined(CONFIG_ARM_PSCI)
+#if defined(CONFIG_ARM_PSCI)
 int psci_init(void);
+#if defined(CONFIG_SMP)
 bool psci_smp_available(void);
 #else
-static inline int psci_init(void) { return 0; }
 static inline bool psci_smp_available(void) { return false; }
+#endif
+#else
+static inline int psci_init(void) { return 0; }
 #endif
 
 #endif /* __ASM_ARM_PSCI_H */

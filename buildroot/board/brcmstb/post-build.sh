@@ -13,7 +13,7 @@ STBTOOLS=`ls -1t dl/brcm-pm/stbtools-*.tar.gz 2>/dev/null | head -1`
 # If the stbtools tar-ball doesn't exist in the local download directory, check
 # if we have a download cache elsewhere.
 if [ ! -r "${STBTOOLS}" ]; then
-	dl_cache=`grep BR2_DL_DIR "${TARGET_DIR}/../.config" | cut -d= -f2 | \
+	dl_cache=`grep BR2_DL_DIR= "${TARGET_DIR}/../.config" | cut -d= -f2 | \
 		sed -e 's/"//g'`
 	if [ "${dl_cache}" != "" ]; then
 		echo "Attempting to find stbtools in ${dl_cache}..."
@@ -25,16 +25,16 @@ fi
 if [ ! -r "${STBTOOLS}" ]; then
 	echo "$prg: stbtools tar-ball not found, aborting!" 1>&2
 	exit 1
-else
-	echo "Extracting skel from ${STBTOOLS}..."
-	# Extract old "skel" directory straight into our new rootfs. If we ever
-	# need to be more selective, we'll extract it into a temporary location
-	# first (${SKEL_DIR}) and pick what we need from there.
-	tar -C "${TARGET_DIR}" -x -z -f "${STBTOOLS}" \
-		--wildcards --strip-components=2 '*/skel'
-	sed -i 's|$(cat $DT_DIR|$(tr -d "\\0" <$DT_DIR|' \
-		${TARGET_DIR}/etc/config/ifup.default
 fi
+
+echo "Extracting skel from ${STBTOOLS}..."
+# Extract old "skel" directory straight into our new rootfs. If we ever need to
+# be more selective, we'll extract it into a temporary location (${SKEL_DIR})
+# and pick what we need from there.
+tar -C "${TARGET_DIR}" -x -z -f "${STBTOOLS}" --wildcards \
+	--strip-components=2 '*/skel'
+sed -i 's|$(cat $DT_DIR|$(tr -d "\\0" <$DT_DIR|' \
+	${TARGET_DIR}/etc/config/ifup.default
 
 if [ ! -e ${TARGET_DIR}/bin/sh ]; then
 	echo "Symlinking /bin/bash -> /bin/sh..."
@@ -113,6 +113,10 @@ if [ -h "${resolvconf}" ]; then
 	touch "${resolvconf}"
 fi
 
+# Add ldd from the host's sysroot
+echo "Copying ldd..."
+cp -p ${HOST_DIR}/*gnu*/sysroot/usr/bin/ldd ${TARGET_DIR}/usr/bin
+
 # Generate brcmstb.conf
 echo "Generating /etc/brcmstb.conf..."
 arch=`basename ${BASE_DIR}`
@@ -121,8 +125,8 @@ arch=`basename ${BASE_DIR}`
 linux_dir=`ls -drt ${BUILD_DIR}/linux-* | egrep 'linux-(stb|custom)' | head -1`
 linux_ver=`./bin/linuxver.sh $linux_dir`
 cat >${TARGET_DIR}/etc/brcmstb.conf <<EOF
-TFTPHOST=`hostname -f`
-TFTPPATH=$linux_ver
+TFTPHOST=${TFTPHOST:=`hostname -f`}
+TFTPPATH=${TFTPPATH:=$linux_ver}
 PLAT=$arch
 VERSION=$linux_ver
 EOF
