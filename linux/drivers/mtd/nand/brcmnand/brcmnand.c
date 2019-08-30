@@ -2198,6 +2198,17 @@ static int brcmnand_setup_dev(struct brcmnand_host *host)
 	cfg->col_adr_bytes = 2;
 	cfg->blk_adr_bytes = get_blk_adr_bytes(mtd->size, mtd->writesize);
 
+	if (chip->ecc.mode != NAND_ECC_NONE &&
+	    (!chip->ecc.size || !chip->ecc.strength)) {
+		if (chip->ecc_step_ds && chip->ecc_strength_ds) {
+			/* use detected ECC parameters */
+			chip->ecc.size = chip->ecc_step_ds;
+			chip->ecc.strength = chip->ecc_strength_ds;
+			dev_info(ctrl->dev, "Using ECC step-size %d, strength %d\n",
+				 chip->ecc.size, chip->ecc.strength);
+		}
+	}
+
 	switch (chip->ecc.size) {
 	case 512:
 		if (chip->ecc.strength == 1) /* Hamming */

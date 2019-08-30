@@ -388,9 +388,6 @@ __bread(struct block_device *bdev, sector_t block, unsigned size)
 
 extern int __set_page_dirty_buffers(struct page *page);
 
-int __inode_device_ejected(struct inode *bd_inode);
-int __sb_device_ejected(struct super_block *sb);
-
 #else /* CONFIG_BLOCK */
 
 static inline void buffer_init(void) {}

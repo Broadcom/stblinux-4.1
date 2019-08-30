@@ -2031,8 +2031,6 @@ int do_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
 	int ret;
 
-	if (__inode_device_ejected(mapping->host))
-		return -ENODEV;
 	if (wbc->nr_to_write <= 0)
 		return 0;
 	if (mapping->a_ops->writepages)
@@ -2104,10 +2102,8 @@ void account_page_dirtied(struct page *page, struct address_space *mapping)
 
 		__inc_zone_page_state(page, NR_FILE_DIRTY);
 		__inc_zone_page_state(page, NR_DIRTIED);
-		if (!__inode_device_ejected(mapping->host)) {
-			__inc_bdi_stat(bdi, BDI_RECLAIMABLE);
-			__inc_bdi_stat(bdi, BDI_DIRTIED);
-		}
+		__inc_bdi_stat(bdi, BDI_RECLAIMABLE);
+		__inc_bdi_stat(bdi, BDI_DIRTIED);
 		task_io_account_write(PAGE_CACHE_SIZE);
 		current->nr_dirtied++;
 		this_cpu_inc(bdp_ratelimits);
@@ -2128,9 +2124,7 @@ void account_page_cleaned(struct page *page, struct address_space *mapping)
 {
 	if (mapping_cap_account_dirty(mapping)) {
 		dec_zone_page_state(page, NR_FILE_DIRTY);
-		if (!__inode_device_ejected(mapping->host))
-			dec_bdi_stat(inode_to_bdi(mapping->host),
-				BDI_RECLAIMABLE);
+		dec_bdi_stat(inode_to_bdi(mapping->host), BDI_RECLAIMABLE);
 		task_io_account_cancelled_write(PAGE_CACHE_SIZE);
 	}
 }

@@ -748,9 +748,6 @@ static int __fat_write_inode(struct inode *inode, int wait)
 	sector_t blocknr;
 	int err, offset;
 
-	if (__sb_device_ejected(sb))
-		return -ENODEV;
-
 	if (inode->i_ino == MSDOS_ROOT_INO)
 		return 0;
 

@@ -1999,20 +1999,6 @@ static int __block_commit_write(struct inode *inode, struct page *page,
 	return 0;
 }
 
-int __inode_device_ejected(struct inode *bd_inode)
-{
-	struct backing_dev_info *bdi = inode_to_bdi(bd_inode);
-
-	return bdi->dev == NULL;
-}
-
-int __sb_device_ejected(struct super_block *sb)
-{
-	struct inode *bd_inode = sb->s_bdev->bd_inode;
-
-	return __inode_device_ejected(bd_inode);
-}
-
 /*
  * block_write_begin takes care of the basic task of block allocation and
  * bringing partial write blocks uptodate first.
@@ -2025,9 +2011,6 @@ int block_write_begin(struct address_space *mapping, loff_t pos, unsigned len,
 	pgoff_t index = pos >> PAGE_CACHE_SHIFT;
 	struct page *page;
 	int status;
-
-	if (__inode_device_ejected(mapping->host))
-		return -ENODEV;
 
 	page = grab_cache_page_write_begin(mapping, index, flags);
 	if (!page)
@@ -2051,9 +2034,6 @@ int block_write_end(struct file *file, struct address_space *mapping,
 {
 	struct inode *inode = mapping->host;
 	unsigned start;
-
-	if (__inode_device_ejected(mapping->host))
-		return -ENODEV;
 
 	start = pos & (PAGE_CACHE_SIZE - 1);
 

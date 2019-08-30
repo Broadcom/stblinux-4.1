@@ -34,7 +34,7 @@ static inline u32 cbc_readl(int reg)
 	if (offset == -1)
 		return (u32)-1;
 
-	return __raw_readl(cpubiuctrl_base + offset);
+	return readl_relaxed(cpubiuctrl_base + offset);
 }
 
 static inline void cbc_writel(u32 val, int reg)
@@ -44,7 +44,7 @@ static inline void cbc_writel(u32 val, int reg)
 	if (offset == -1)
 		return;
 
-	__raw_writel(val,  cpubiuctrl_base + offset);
+	writel(val, cpubiuctrl_base + offset);
 }
 
 enum cpubiuctrl_regs {

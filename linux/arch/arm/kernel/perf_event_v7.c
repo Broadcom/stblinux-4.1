@@ -1979,6 +1979,11 @@ static inline int armv7_a15_pmu_init(struct arm_pmu *cpu_pmu)
 	return -ENODEV;
 }
 
+static inline int armv7_a53_pmu_init(struct arm_pmu *cpu_pmu)
+{
+	return -ENODEV;
+}
+
 static inline int armv7_a7_pmu_init(struct arm_pmu *cpu_pmu)
 {
 	return -ENODEV;
