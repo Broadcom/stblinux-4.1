@@ -273,9 +273,9 @@
 			#size-cells = <0>;
 			compatible = "brcm,brcmnand-v5.0",
 				"brcm,brcmnand";
-			reg-names = "nand";
+			reg-names = "nand", "flash-edu";
 			status = "disabled";
-			reg = <0x41b800 0x400>;
+			reg = <0x41b800 0x400>, <0x41bc00 0x24>;
 			interrupts = <0x18>;
 			interrupt-parent = <&hif_intr2_intc>;
 			interrupt-names = "nand_ctlrdy";

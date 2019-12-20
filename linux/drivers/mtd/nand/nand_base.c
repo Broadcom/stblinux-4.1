@@ -105,6 +105,11 @@ static int nand_do_write_oob(struct mtd_info *mtd, loff_t to,
  */
 DEFINE_LED_TRIGGER(nand_led_trigger);
 
+static int nand_use_bounce_buf(const void *buf)
+{
+	return !virt_addr_valid(buf) || is_vmalloc_addr(buf);
+}
+
 static int check_offs_len(struct mtd_info *mtd,
 					loff_t ofs, uint64_t len)
 {
@@ -1586,7 +1591,7 @@ static int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
 		if (!aligned)
 			use_bufpoi = 1;
 		else if (chip->options & NAND_USE_BOUNCE_BUFFER)
-			use_bufpoi = !virt_addr_valid(buf);
+			use_bufpoi = nand_use_bounce_buf(buf);
 		else
 			use_bufpoi = 0;
 
@@ -2455,7 +2460,7 @@ static int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
 		if (part_pagewr)
 			use_bufpoi = 1;
 		else if (chip->options & NAND_USE_BOUNCE_BUFFER)
-			use_bufpoi = !virt_addr_valid(buf);
+			use_bufpoi = nand_use_bounce_buf(buf);
 		else
 			use_bufpoi = 0;
 
