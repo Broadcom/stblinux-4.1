@@ -1,17 +1,31 @@
-BRCMSTB_OUTPUT_DIR ?= output
-BRCMSTB_RELEASE_DIR = $(BRCMSTB_OUTPUT_DIR)/release
+BRCMSTB_OUTPUT_DIR	?= output
+BRCMSTB_RELEASE_DIR	= $(BRCMSTB_OUTPUT_DIR)/release
 
-BRCMSTB_VER := $(shell ./bin/linuxver.sh -dpqs misc/linux.master)
-BRCMSTB_LONG_VER := $(shell ./bin/linuxver.sh -q misc/linux.master)
+BRCMSTB_LINUX_DIR	:= misc/linux.master
+FRAG_FILE		:= output/release_frag.cfg
 
-VERSION		:= $(shell bin/linuxver.sh -q misc/linux.master)
-DOTVERSION	:= $(patsubst 3%,3.%,$(patsubst 4%,4.%,$(patsubst 5%,5.%,$(VERSION))))
-MAJOR_VERSION	:= $(shell echo $(VERSION) | cut -d- -f1)
-STB_VERSION	:= stb-$(shell echo $(DOTVERSION) | cut -d- -f1)
+VERSION			:= $(shell bin/linuxver.sh -q $(BRCMSTB_LINUX_DIR))
+DOTVERSION		:= $(shell bin/linuxver.sh -dq $(BRCMSTB_LINUX_DIR))
 
-BINARY_DST	= $(BRCMSTB_RELEASE_DIR)/buildroot-$(VERSION)
-SRC_DST		= $(BRCMSTB_RELEASE_DIR)/src
+TOOLCHAIN		:= $(shell cat misc/toolchain.master 2>/dev/null || \
+				cat misc/toolchain)
 
+STB_VERSION		:= stb-$(shell echo $(DOTVERSION) | cut -d- -f1)
+
+STBTOOLS_SRC_PATH 	:= dl/brcm-pm
+STBTOOLS_GEN_TAR 	:= $(STBTOOLS_SRC_PATH)/git/gen_tarball.sh
+STBTOOLS_VERSION	:= $(shell grep 'default [0-9a-f]\+$$' \
+				package/brcm-pm/Config.in | awk '{ print $$2 }')
+
+BINARY_DST		= $(BRCMSTB_RELEASE_DIR)/buildroot-$(VERSION)
+SRC_DST			= $(BRCMSTB_RELEASE_DIR)/src
+
+
+# Run "make brcmstb-release RELEASE=1" for official builds. If you do, the build
+# process won't add the kernel's GIT SHA to the Linux version number.
+ifeq ($(RELEASE),1)
+BR_CONFIG_RELEASE_FLAGS	= -S
+endif
 
 define BRCMSTB_HELP_CMDS
 	@echo '  brcmstb-tarball       - buildroot tar-ball w/o package sources'
@@ -22,6 +36,7 @@ define BRCMSTB_HELP_CMDS
 	@echo '  brcmstb-<arch>        - build a single architecture'
 	@echo ''
 	@echo '  * this is the recommended target to generate a release'
+	@echo 'Pass RELEASE=1 as additional argument for official release builds.'
 endef
 
 BRCMSTB_NAME	= Broadcom STB
@@ -70,19 +85,45 @@ linux-release:
 linux-diffs:
 	@echo "Generating Linux diffs..."
 	test -d $(SRC_DST) || mkdir -p $(SRC_DST)
-	(cd ..; tools/makedelta.pl)
-	mv ../delta*.patch.bz2 $(SRC_DST)
+	bin/makedelta.pl $(BRCMSTB_LINUX_DIR) $(SRC_DST)
 
 brcmstb-release: brcmstb-diffs linux-diffs linux-release
 	@if [ "$(VERSION)" = "" ]; then exit 1; fi
+	unset BR_SKIP_LEGAL_INFO; \
 	for arch in `bin/get_archs.pl $(STB_VERSION)`; do \
-		bin/br_config.pl -o $(BRCMSTB_OUTPUT_DIR) -i -n \
-			-L misc/linux.master $${arch}; \
+		extra=""; \
+		if [ "$${arch}" == "bmips" ]; then \
+			linux_arch="mips"; \
+		else \
+			linux_arch="$${arch}"; \
+		fi; \
+		a="$(BRCMSTB_LINUX_DIR)/arch/$${linux_arch}"; \
+		i="$(BRCMSTB_LINUX_DIR)/include/linux"; \
+		if [ -d "$(BRCMSTB_LINUX_DIR)" ]; then \
+			if [ ! -e "$${a}/configs/brcmstb_defconfig" -a \
+			     ! -e "$${a}/configs/bmips_stb_defconfig" ]; then \
+				echo "Using default defconfig for $${arch}."; \
+				extra="-D"; \
+			fi; \
+			if [ ! -e "$${i}/brcmstb/cma_driver.h" ]; then \
+				echo "Turning off CMATOOL for $${arch}."; \
+				echo '# BR2_PACKAGE_CMATOOL is not set' \
+					>"$(FRAG_FILE)"; \
+				extra="$${extra} -f $(FRAG_FILE)"; \
+			fi; \
+		fi; \
+		bin/br_config.pl \
+			-T $(TOOLCHAIN) \
+			-o $(BRCMSTB_OUTPUT_DIR) -i -n \
+			$(BR_CONFIG_RELEASE_FLAGS) $${extra} \
+			-L $(BRCMSTB_LINUX_DIR) $${arch}; \
 		err=$$?; \
 		test $${err} = 0 || exit $${err}; \
 	done
 	mkdir -p $(BINARY_DST)
-	cp -a $(BRCMSTB_OUTPUT_DIR)/*/images/* $(BINARY_DST)
+	# Ensure we don't copy any rootfs.cpio files (they would clash)
+	rsync -a $(BRCMSTB_OUTPUT_DIR)/*/images/ \
+		--exclude=rootfs.cpio $(BINARY_DST)
 	@echo "Adding downloaded sources to tar-ball..."
 	# We want to skip the GIT trees buildroot creates (e.g. dl/linux/git).
 	# Therefore, we exclude 'git' and 'git.readme'. If we ever wanted to
@@ -94,6 +135,15 @@ brcmstb-release: brcmstb-diffs linux-diffs linux-release
 	bzip2 $(SRC_DST)/buildroot-$(DOTVERSION).tar
 	ln -s buildroot-$(DOTVERSION).tar.bz2 \
 		$(SRC_DST)/rootfs-$(DOTVERSION).tar.bz2
+	# Use stbtools script to generate the stbtools tar-ball, if it exists.
+	# Fall back to the tar-ball Buildroot generated, if it doesn't.
+	if [ -x $(STBTOOLS_GEN_TAR) ]; then \
+		$(STBTOOLS_GEN_TAR) $(STBTOOLS_VERSION) $(SRC_DST); \
+	else \
+		echo "Copying stbtools-$(STBTOOLS_VERSION).tar.gz..."; \
+		cp -p $(STBTOOLS_SRC_PATH)/stbtools-$(STBTOOLS_VERSION).tar.gz \
+			$(SRC_DST); \
+	fi
 
 brcmstb-%:
-	bin/br_config.pl -b $*
+	bin/br_config.pl -T $(TOOLCHAIN) -b $*

@@ -558,39 +558,59 @@ static void moca_hw_init(struct moca_priv_data *priv, int action)
 	if (priv->moca_ops->hw_init)
 		priv->moca_ops->hw_init(priv->hw_priv, action, &priv->enabled,
 				     priv->bonded_mode);
+}
+
+static void moca_clk_prepare_enable(struct moca_priv_data *priv)
+{
+	int clk_status = 0;
+
+	if (priv->enabled)
+		return;
+
+	clk_status = clk_prepare_enable(priv->clk);
+	if (clk_status != 0) {
+		dev_err(priv->dev, "moca clk enable failed\n");
+		goto clk_err_chk;
 	}
+
+	clk_status = clk_prepare_enable(priv->phy_clk);
+	if (clk_status != 0) {
+		dev_err(priv->dev, "moca phy clk enable failed\n");
+		goto clk_err_chk;
+	}
+
+	clk_status = clk_prepare_enable(priv->cpu_clk);
+	if (clk_status != 0) {
+		dev_err(priv->dev, "moca cpu clk enable failed\n");
+		goto clk_err_chk;
+	}
+
+	clk_status = clk_prepare_enable(priv->wol_clk);
+	if (clk_status != 0)
+		dev_err(priv->dev, "moca cpu clk enable failed\n");
+clk_err_chk:
+	priv->enabled = clk_status ? 0 : 1;
+}
+
+static void moca_clk_disable_unprepare(struct moca_priv_data *priv)
+{
+	if (priv->enabled) {
+		priv->enabled = 0;
+		clk_disable_unprepare(priv->cpu_clk);
+		clk_disable_unprepare(priv->phy_clk);
+		clk_disable_unprepare(priv->clk);
+		clk_disable_unprepare(priv->wol_clk);
+	}
+}
 
 static void moca_int_hw_init(void *hw_priv, int action, int *enabled,
 			     int bonded_mode)
 {
 	struct moca_priv_data *priv = hw_priv;
 	const struct moca_regs *r = priv->regs;
-	int clk_status = 0;
 
-	if (action == MOCA_ENABLE && !priv->enabled) {
-		clk_status = clk_prepare_enable(priv->clk);
-		if (clk_status != 0) {
-			dev_err(priv->dev, "moca clk enable failed\n");
-			goto clk_err_chk;
-		}
-
-		clk_status = clk_prepare_enable(priv->phy_clk);
-		if (clk_status != 0) {
-			dev_err(priv->dev, "moca phy clk enable failed\n");
-			goto clk_err_chk;
-		}
-		clk_status = clk_prepare_enable(priv->cpu_clk);
-		if (clk_status != 0) {
-			dev_err(priv->dev, "moca cpu clk enable failed\n");
-			goto clk_err_chk;
-		}
-
-		clk_status = clk_prepare_enable(priv->wol_clk);
-		if (clk_status != 0)
-			dev_err(priv->dev, "moca cpu clk enable failed\n");
-clk_err_chk:
-		priv->enabled = clk_status ? 0 : 1;
-	}
+	if (action == MOCA_ENABLE)
+		moca_clk_prepare_enable(priv);
 
 	/* clock not enabled, register accesses will fail with bus error */
 	if (!priv->enabled)
@@ -631,13 +651,8 @@ clk_err_chk:
 	MOCA_WR(priv->base + r->l2_mask_clear_offset, M2H_DMA);
 	MOCA_RD(priv->base + r->l2_mask_clear_offset);
 
-	if (action == MOCA_DISABLE && priv->enabled) {
-		priv->enabled = 0;
-		clk_disable_unprepare(priv->cpu_clk);
-		clk_disable_unprepare(priv->phy_clk);
-		clk_disable_unprepare(priv->clk);
-		clk_disable_unprepare(priv->wol_clk);
-	}
+	if (action == MOCA_DISABLE)
+		moca_clk_disable_unprepare(priv);
 }
 
 static void moca_ringbell(struct moca_priv_data *priv, u32 mask)
@@ -2418,8 +2433,11 @@ static int moca_parse_dt_node(struct moca_priv_data *priv)
 
 	/* get the common clocks from bmoca node */
 	priv->clk = devm_clk_get(priv->dev, "sw_moca");
-	if (IS_ERR(priv->clk))
+	if (IS_ERR(priv->clk)) {
+		if (PTR_ERR(priv->clk) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
 		priv->clk = NULL;
+	};
 
 	priv->cpu_clk = devm_clk_get(priv->dev, "sw_moca_cpu");
 	if (IS_ERR(priv->cpu_clk))
@@ -2479,6 +2497,7 @@ static int moca_parse_dt_node(struct moca_priv_data *priv)
 	 * reading it from the chip family ID register.
 	 */
 	of_property_read_u32(of_node, "chip-id", &pd->chip_id);
+
 err:
 	return status;
 }
@@ -2889,6 +2908,7 @@ int moca_initialize(struct device *dev, struct moca_ops *moca_ops,
 		priv->i2c_base = devm_ioremap(dev, pd->bcm3450_i2c_base,
 					      sizeof(struct bsc_regs));
 
+	moca_hw_init(priv, MOCA_ENABLE);
 	/* leave core in reset until we get an ioctl */
 	moca_hw_reset(priv);
 
@@ -2909,7 +2929,6 @@ int moca_initialize(struct device *dev, struct moca_ops *moca_ops,
 		enable_irq_wake(priv->wol_irq);
 	}
 
-	moca_hw_init(priv, MOCA_ENABLE);
 	moca_msg_reset(priv);
 	moca_hw_init(priv, MOCA_DISABLE);
 
@@ -3032,6 +3051,8 @@ static int moca_suspend(struct device *dev)
 			switch (priv->state) {
 			case MOCA_SUSPENDING_GOT_ACK:
 				moca_set_pm_state(priv, MOCA_SUSPENDED);
+				/* if clocks are enabled then disable now */
+				moca_clk_disable_unprepare(priv);
 				break;
 
 			case MOCA_SUSPENDING:
@@ -3055,7 +3076,10 @@ static int moca_resume(struct device *dev)
 	for (minor = 0; minor < NUM_MINORS; minor++) {
 		struct moca_priv_data *priv = minor_tbl[minor];
 
-		if (priv && priv->enabled) {
+		if (priv) {
+			/* if clocks are disabled we need to enable them now */
+			moca_clk_prepare_enable(priv);
+
 			if (priv->state != MOCA_RESUMING_WDOG
 			    && moca_in_reset(priv)) {
 				/*
@@ -3065,7 +3089,6 @@ static int moca_resume(struct device *dev)
 				 * enabled, try to get things back in
 				 * sync.
 				 */
-				priv->enabled = 0;
 				dev_warn(priv->dev, "S3 : sending moca reset\n");
 				moca_msg_reset(priv);
 				rc = moca_send_reset_trap(priv);

@@ -43,6 +43,9 @@ int brcm_usb_probe(struct platform_device *pdev,
 	/* Get the phy */
 	phy = devm_phy_get(&pdev->dev, "usbphy");
 	if (IS_ERR(phy)) {
+		if (PTR_ERR(phy) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+
 		dev_err(&pdev->dev, "USB Phy not found.\n");
 		return PTR_ERR(phy);
 	}
@@ -63,6 +66,9 @@ int brcm_usb_probe(struct platform_device *pdev,
 
 	usb_clk = of_clk_get_by_name(dn, "sw_usb");
 	if (IS_ERR(usb_clk)) {
+		if (PTR_ERR(usb_clk) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+
 		dev_err(&pdev->dev, "Clock not found in Device Tree\n");
 		usb_clk = NULL;
 	}

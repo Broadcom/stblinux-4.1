@@ -11,7 +11,11 @@
 #else
 # define SECTION_SIZE_BITS	28
 #endif
-#define MAX_PHYSMEM_BITS	48
+#if defined(CONFIG_32BIT) && defined(CONFIG_HIGHMEM)
+ #define MAX_PHYSMEM_BITS	35
+#else
+ #define MAX_PHYSMEM_BITS	48
+#endif
 
 #endif /* CONFIG_SPARSEMEM */
 #endif /* _MIPS_SPARSEMEM_H */

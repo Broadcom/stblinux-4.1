@@ -203,6 +203,7 @@ static inline void __dma_sync_virtual(void *addr, size_t size,
 		break;
 
 	case DMA_FROM_DEVICE:
+		dma_ra_cache_inv((unsigned long)addr, size);
 		dma_cache_inv((unsigned long)addr, size);
 		break;
 

@@ -123,7 +123,6 @@ struct of_cpu_method {
  */
 extern void smp_set_ops(struct smp_operations *);
 
-extern int set_ipi_handler(int ipinr, void *handler, char *desc);
-extern void clear_ipi_handler(int ipinr);
+#include <linux/brcmstb/irq_api.h>
 
 #endif /* ifndef __ASM_ARM_SMP_H */

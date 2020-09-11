@@ -25,6 +25,7 @@
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 #include <linux/basic_mmio_gpio.h>
+#include <linux/slab.h>
 
 #include <linux/brcmstb/brcmstb.h>
 #include <linux/brcmstb/gpio_api.h>
@@ -37,6 +38,13 @@
 #define BCHP_BUS_MASK	0x3FFFFFF
 
 static const char *brcmstb_gpio_compat = GPIO_DT_COMPAT;
+
+struct brcmstb_gpio_ctl_list_ent {
+	struct device_node *dn;
+	struct list_head next;
+};
+
+static LIST_HEAD(brcmstb_gpio_ctl_list);
 
 static int brcmstb_gpio_chip_find(struct gpio_chip *chip, void *data)
 {
@@ -79,12 +87,14 @@ static int brcmstb_gpio_request(unsigned int gpio)
 
 static int brcmstb_gpio_find_base_by_addr(uint32_t addr, uint32_t *start)
 {
+	struct brcmstb_gpio_ctl_list_ent *ent;
 	struct device_node *dn;
 	struct gpio_chip *gc;
 	struct resource res;
 	int ret;
 
-	for_each_compatible_node(dn, NULL, brcmstb_gpio_compat) {
+	list_for_each_entry(ent, &brcmstb_gpio_ctl_list, next) {
+		dn = ent->dn;
 		ret = of_address_to_resource(dn, 0, &res);
 		if (ret) {
 			pr_err("%s: unable to translate resource\n", __func__);
@@ -278,3 +288,28 @@ void brcmstb_gpio_remove(void)
     }
 }
 EXPORT_SYMBOL(brcmstb_gpio_remove);
+
+static int brcmstb_gpio_cache_init(void)
+{
+	struct brcmstb_gpio_ctl_list_ent *ent;
+	struct device_node *dn;
+
+	for_each_compatible_node(dn, NULL, brcmstb_gpio_compat) {
+		if (!of_device_is_available(dn))
+			continue;
+
+		ent = kzalloc(sizeof(*ent), GFP_KERNEL);
+		if (!ent)
+			return -ENOMEM;
+
+		INIT_LIST_HEAD(&ent->next);
+		ent->dn = dn;
+
+		pr_debug("%s: added GPIO %s\n", __func__, dn->full_name);
+
+		list_add_tail(&ent->next, &brcmstb_gpio_ctl_list);
+	}
+
+	return 0;
+}
+device_initcall(brcmstb_gpio_cache_init);

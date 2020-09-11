@@ -590,10 +590,12 @@ static inline void memcpy_toio(volatile void __iomem *dst, const void *src, int 
 extern void (*_dma_cache_wback_inv)(unsigned long start, unsigned long size);
 extern void (*_dma_cache_wback)(unsigned long start, unsigned long size);
 extern void (*_dma_cache_inv)(unsigned long start, unsigned long size);
+extern void (*_dma_ra_cache_inv)(unsigned long start, unsigned long size);
 
 #define dma_cache_wback_inv(start, size)	_dma_cache_wback_inv(start, size)
 #define dma_cache_wback(start, size)		_dma_cache_wback(start, size)
 #define dma_cache_inv(start, size)		_dma_cache_inv(start, size)
+#define dma_ra_cache_inv(start, size)		_dma_ra_cache_inv(start, size)
 
 #else /* Sane hardware */
 
@@ -602,6 +604,8 @@ extern void (*_dma_cache_inv)(unsigned long start, unsigned long size);
 #define dma_cache_wback(start,size)	\
 	do { (void) (start); (void) (size); } while (0)
 #define dma_cache_inv(start,size)	\
+	do { (void) (start); (void) (size); } while (0)
+#define dma_ra_cache_inv(start, size)	\
 	do { (void) (start); (void) (size); } while (0)
 
 #endif /* CONFIG_DMA_NONCOHERENT || CONFIG_DMA_MAYBE_COHERENT */

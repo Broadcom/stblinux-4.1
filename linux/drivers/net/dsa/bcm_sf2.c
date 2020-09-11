@@ -288,6 +288,7 @@ static void bcm_sf2_imp_setup(struct dsa_switch *ds, int port)
 
 	/* Force link status for IMP port */
 	reg = core_readl(priv, offset);
+	reg &= ~GMII_SPEED_UP_2G;
 	reg |= (MII_SW_OR | LINK_STS);
 	core_writel(priv, reg, offset);
 
@@ -1182,6 +1183,9 @@ static int bcm_sf2_sw_setup(struct dsa_switch *ds)
 
 	priv->clk = of_clk_get_by_name(dn, "sw_switch");
 	if (IS_ERR(priv->clk)) {
+		if (PTR_ERR(priv->clk) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+
 		pr_warn("%s: failed to request clock\n", __func__);
 		priv->clk = NULL;
 	}

@@ -111,11 +111,13 @@ struct brcm_nand_dma_desc {
 
 #define FLASH_RDY	(NAND_STATUS_READY)
 #define NAND_CTRL_RDY	(INTFC_CTLR_READY | INTFC_FLASH_READY)
+#define NAND_POLL_STATUS_TIMEOUT_MS	100
 
 #define EDU_CMD_WRITE		0x00
 #define EDU_CMD_READ		0x01
 #define EDU_STATUS_ACTIVE	BIT(0)
 #define EDU_ERR_STATUS_ERRACK	BIT(0)
+#define EDU_DONE_MASK		GENMASK(1, 0)
 
 #define EDU_CONFIG_MODE_NAND	BIT(0)
 #define EDU_CONFIG_SWAP_BYTE	BIT(1)
@@ -964,60 +966,36 @@ enum {
 	CS_SELECT_AUTO_DEVICE_ID_CFG		= BIT(30),
 };
 
-static int bcmnand_ctrl_busy_poll(struct brcmnand_controller *ctrl, u32 mask)
+static int bcmnand_ctrl_poll_status(struct brcmnand_controller *ctrl,
+				    u32 mask, u32 expected_val,
+				    unsigned long timeout_ms)
 {
-	unsigned long timeout = jiffies + msecs_to_jiffies(200);
+	unsigned long limit;
+	u32 val;
 
-	if (!mask)
-		mask = INTFC_CTLR_READY;
+	if (!timeout_ms)
+		timeout_ms = NAND_POLL_STATUS_TIMEOUT_MS;
 
-	while ((brcmnand_read_reg(ctrl, BRCMNAND_INTFC_STATUS) & mask) !=
-		mask) {
-		if (time_after(jiffies, timeout)) {
-			dev_warn(ctrl->dev, "timeout on ctrl_ready\n");
-			return -ETIMEDOUT;
-		}
+	limit = jiffies + msecs_to_jiffies(timeout_ms);
+	do {
+		val = brcmnand_read_reg(ctrl, BRCMNAND_INTFC_STATUS);
+		if ((val & mask) == expected_val)
+			return 0;
+
 		cpu_relax();
-	}
-	return 0;
+	} while (time_after(limit, jiffies));
+
+	dev_warn(ctrl->dev, "timeout on status poll (expected %x got %x)\n",
+		 expected_val, val & mask);
+
+	return -ETIMEDOUT;
 }
 
-static inline void brcmnand_set_wp_reg(struct brcmnand_controller *ctrl, int en)
+static inline void brcmnand_set_wp(struct brcmnand_controller *ctrl, int en)
 {
 	u32 val = en ? CS_SELECT_NAND_WP : 0;
 
 	brcmnand_rmw_reg(ctrl, BRCMNAND_CS_SELECT, CS_SELECT_NAND_WP, 0, val);
-}
-
-static void brcmnand_set_wp(struct brcmnand_host *host, int en)
-{
-	struct brcmnand_controller *ctrl = host->ctrl;
-	struct mtd_info *mtd = &host->mtd;
-	struct nand_chip *chip = mtd->priv;
-	u32 sts_reg;
-	bool is_wp;
-
-	/*
-	 * make sure ctrl/flash ready before and after
-	 * changing state of WP PIN
-	 */
-	bcmnand_ctrl_busy_poll(ctrl, NAND_CTRL_RDY | FLASH_RDY);
-	brcmnand_set_wp_reg(ctrl, en);
-	chip->cmdfunc(mtd, NAND_CMD_STATUS, -1, -1);
-	bcmnand_ctrl_busy_poll(ctrl, NAND_CTRL_RDY | FLASH_RDY);
-	sts_reg = brcmnand_read_reg(ctrl, BRCMNAND_INTFC_STATUS);
-	/* NAND_STATUS_WP 0x80 = not protected, 0x00 = protected */
-	is_wp = (sts_reg & NAND_STATUS_WP) ? false : true;
-
-	if (is_wp != en) {
-		u32 nand_wp = brcmnand_read_reg(ctrl, BRCMNAND_CS_SELECT);
-
-		nand_wp &= CS_SELECT_NAND_WP;
-		dev_err_ratelimited(&host->pdev->dev,
-				    "#WP %s sts:0x%x expected %s NAND_WP 0x%x\n",
-				    is_wp ? "On" : "Off",  sts_reg & 0xff,
-				    en ? "On" : "Off", nand_wp ? 1 : 0);
-	}
 }
 
 /***********************************************************************
@@ -1251,13 +1229,41 @@ static void brcmnand_wp(struct mtd_info *mtd, int wp)
 
 	if ((ctrl->features & BRCMNAND_HAS_WP) && wp_on == 1) {
 		static int old_wp = -1;
+		int ret;
 
 		if (old_wp != wp) {
 			dev_dbg(ctrl->dev, "WP %s\n", wp ? "on" : "off");
 			old_wp = wp;
 		}
-		brcmnand_set_wp(host, wp);
+
+		/*
+		 * make sure ctrl/flash ready before and after
+		 * changing state of #WP pin
+		 */
+		ret = bcmnand_ctrl_poll_status(ctrl, NAND_CTRL_RDY |
+					       NAND_STATUS_READY,
+					       NAND_CTRL_RDY |
+					       NAND_STATUS_READY, 0);
+		if (ret)
+			return;
+
+		brcmnand_set_wp(ctrl, wp);
+		chip->cmdfunc(mtd, NAND_CMD_STATUS, -1, -1);
+		/* NAND_STATUS_WP 0x00 = protected, 0x80 = not protected */
+		ret = bcmnand_ctrl_poll_status(ctrl,
+					       NAND_CTRL_RDY |
+					       NAND_STATUS_READY |
+					       NAND_STATUS_WP,
+					       NAND_CTRL_RDY |
+					       NAND_STATUS_READY |
+					       (wp ? 0 : NAND_STATUS_WP), 0);
+
+		if (ret)
+			dev_err_ratelimited(&host->pdev->dev,
+					    "nand #WP expected %s\n",
+					    wp ? "on" : "off");
 	}
+
 }
 
 /* Helper functions for reading and writing OOB registers */
@@ -1356,7 +1362,7 @@ static irqreturn_t brcmnand_edu_irq(int irq, void *data)
 
 	if (ctrl->edu_count) {
 		ctrl->edu_count--;
-		while (!edu_readl(ctrl, EDU_DONE))
+		while (!(edu_readl(ctrl, EDU_DONE) & EDU_DONE_MASK))
 			udelay(1);
 		edu_writel(ctrl, EDU_DONE, 0);
 		(void)edu_readl(ctrl, EDU_DONE);
@@ -1425,18 +1431,25 @@ static irqreturn_t brcmnand_dma_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+/* forward declare */
+static int brcmnand_read_by_pio(struct mtd_info *mtd, struct nand_chip *chip,
+				u64 addr, unsigned int trans, u32 *buf,
+				u8 *oob, u64 *err_addr);
+
 /**
  *  Kick EDU engine
  */
 static int brcmnand_edu_trans(struct brcmnand_host *host, u64 addr, u32 *buf,
-			       u32 len, u8 edu_cmd)
+			       u32 len, u8 cmd)
 {
 	struct brcmnand_controller *ctrl = host->ctrl;
 	unsigned long timeo = msecs_to_jiffies(200);
 	int ret = 0;
-	int dir = edu_cmd == EDU_CMD_READ ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
-	unsigned int trans = len/FC_BYTES;
+	int dir = (cmd == CMD_PAGE_READ ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
+	u8 edu_cmd = (cmd == CMD_PAGE_READ ? EDU_CMD_READ : EDU_CMD_WRITE);
+	unsigned int trans = len >> FC_SHIFT;
 	dma_addr_t pa;
+	u32 edu_err_sts;
 
 	pa = dma_map_single(ctrl->dev, buf, len, dir);
 	if (dma_mapping_error(ctrl->dev, pa)) {
@@ -1444,7 +1457,6 @@ static int brcmnand_edu_trans(struct brcmnand_host *host, u64 addr, u32 *buf,
 		return -ENOMEM;
 	}
 
-	/* Start edu engine */
 	ctrl->edu_pending = true;
 	mb(); /* flush previous writes */
 
@@ -1454,12 +1466,13 @@ static int brcmnand_edu_trans(struct brcmnand_host *host, u64 addr, u32 *buf,
 	ctrl->edu_count = trans;
 
 	edu_writel(ctrl, EDU_DRAM_ADDR, (u32)ctrl->edu_dram_addr);
-	(void)brcmnand_read_reg(ctrl,  EDU_DRAM_ADDR);
-	edu_writel(ctrl, EDU_EXT_ADDR, ctrl->edu_ext_addr);
+	(void)edu_readl(ctrl,  EDU_DRAM_ADDR);
+	edu_writel(ctrl, EDU_EXT_ADDR, (u32)ctrl->edu_ext_addr);
 	(void)edu_readl(ctrl, EDU_EXT_ADDR);
 	edu_writel(ctrl, EDU_LENGTH, FC_BYTES);
 	(void)edu_readl(ctrl, EDU_LENGTH);
 
+	/* Start edu engine */
 	mb(); /* flush previous writes */
 	edu_writel(ctrl, EDU_CMD, ctrl->edu_cmd);
 	(void)edu_readl(ctrl, EDU_CMD);
@@ -1482,21 +1495,47 @@ static int brcmnand_edu_trans(struct brcmnand_host *host, u64 addr, u32 *buf,
 		ret = -EIO;
 	}
 
-	/* Make sure the EDU status is clean */
-	if (edu_readl(ctrl, EDU_STATUS) & EDU_STATUS_ACTIVE)
+	edu_err_sts = edu_readl(ctrl, EDU_STATUS);
+
+		/* Make sure the EDU status is clean */
+	if (edu_err_sts & EDU_STATUS_ACTIVE)
 		dev_warn(ctrl->dev, "EDU still active: %#x\n",
 			 edu_readl(ctrl, EDU_STATUS));
 
-	if (unlikely(edu_readl(ctrl, EDU_ERR_STATUS) & EDU_ERR_STATUS_ERRACK)) {
+	if (edu_err_sts & EDU_ERR_STATUS_ERRACK) {
 		dev_warn(ctrl->dev, "EDU RBUS error at addr %llx\n",
 			(unsigned long long)addr);
 		ret = -EIO;
 	}
 
-	edu_writel(ctrl, EDU_ERR_STATUS, 0);
-
+	/* done with edu transaction */
 	ctrl->edu_pending = false;
+	edu_writel(ctrl, EDU_ERR_STATUS, 0);
+	edu_readl(ctrl, EDU_ERR_STATUS);
 	edu_writel(ctrl, EDU_STOP, 0); /* force stop */
+	edu_readl(ctrl, EDU_STOP);
+
+	if (ret == 0 && edu_cmd == EDU_CMD_READ) {
+		u64 err_addr = 0;
+
+		/*
+		 * check for ecc errors here, subpage ecc erros are
+		 * retained in ecc error addr register
+		 */
+		err_addr = brcmnand_get_uncorrecc_addr(ctrl);
+		if (!err_addr)
+			err_addr = brcmnand_get_correcc_addr(ctrl);
+
+		/* ecc errors with edu need read with pio */
+		if (err_addr) {
+			struct nand_chip *chip = &host->chip;
+			struct mtd_info *mtd = &host->mtd;
+
+			ret = brcmnand_read_by_pio(mtd, chip, addr, trans, buf,
+						   NULL, &err_addr);
+		}
+	}
+
 
 	return ret;
 }
@@ -1504,8 +1543,7 @@ static int brcmnand_edu_trans(struct brcmnand_host *host, u64 addr, u32 *buf,
 static void brcmnand_send_cmd(struct brcmnand_host *host, int cmd)
 {
 	struct brcmnand_controller *ctrl = host->ctrl;
-	u32 intfc;
-	u32 mask = NAND_CTRL_RDY;
+	int ret;
 	u64 cmd_addr;
 
 	cmd_addr = brcmnand_read_reg(ctrl, BRCMNAND_CMD_ADDRESS);
@@ -1515,10 +1553,8 @@ static void brcmnand_send_cmd(struct brcmnand_host *host, int cmd)
 	BUG_ON(ctrl->cmd_pending != 0);
 	ctrl->cmd_pending = cmd;
 
-	bcmnand_ctrl_busy_poll(ctrl, mask);
-	intfc = brcmnand_read_reg(ctrl, BRCMNAND_INTFC_STATUS);
-	WARN_ON(!(intfc & INTFC_CTLR_READY));
-
+	ret = bcmnand_ctrl_poll_status(ctrl, NAND_CTRL_RDY, NAND_CTRL_RDY, 0);
+	WARN_ON(ret);
 
 	mb(); /* flush previous writes */
 	brcmnand_write_reg(ctrl, BRCMNAND_CMD_START,
@@ -2621,6 +2657,9 @@ static int brcmnand_suspend(struct device *dev)
 	if (has_flash_dma(ctrl))
 		ctrl->flash_dma_mode = flash_dma_readl(ctrl, FLASH_DMA_MODE);
 
+	if (has_edu(ctrl))
+		ctrl->edu_config = edu_readl(ctrl, EDU_CONFIG);
+
 	return 0;
 }
 
@@ -2632,6 +2671,16 @@ static int brcmnand_resume(struct device *dev)
 	if (has_flash_dma(ctrl)) {
 		flash_dma_writel(ctrl, FLASH_DMA_MODE, ctrl->flash_dma_mode);
 		flash_dma_writel(ctrl, FLASH_DMA_ERROR_STATUS, 0);
+	} else if (has_edu(ctrl)) {
+		edu_writel(ctrl, EDU_CONFIG, ctrl->edu_config);
+		edu_readl(ctrl, EDU_CONFIG);
+		/* initialize edu */
+		edu_writel(ctrl, EDU_ERR_STATUS, 0);
+		edu_writel(ctrl, EDU_DONE, 0);
+		edu_writel(ctrl, EDU_DONE, 0);
+		edu_writel(ctrl, EDU_DONE, 0);
+		edu_writel(ctrl, EDU_DONE, 0);
+		edu_readl(ctrl, EDU_DONE);
 	}
 
 	brcmnand_write_reg(ctrl, BRCMNAND_CS_SELECT, ctrl->nand_cs_nand_select);
@@ -2795,6 +2844,9 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 		/* initialize edu */
 		edu_writel(ctrl, EDU_ERR_STATUS, 0);
 		edu_writel(ctrl, EDU_DONE, 0);
+		edu_writel(ctrl, EDU_DONE, 0);
+		edu_writel(ctrl, EDU_DONE, 0);
+		edu_writel(ctrl, EDU_DONE, 0);
 		(void)edu_readl(ctrl, EDU_DONE);
 
 		ctrl->edu_irq = platform_get_irq(pdev, 1);
@@ -2881,7 +2933,7 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 			if (ctrl->features & BRCMNAND_HAS_WP) {
 				/* Permanently disable write protection */
 				if (wp_on == 2)
-					brcmnand_set_wp(host, false);
+					brcmnand_set_wp(ctrl, false);
 			} else {
 				wp_on = 0;
 			}

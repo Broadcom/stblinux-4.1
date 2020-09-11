@@ -1269,6 +1269,14 @@ int bcm_qspi_probe(struct platform_device *pdev,
 	qspi->trans_pos.byte = 0;
 	qspi->master = master;
 
+	qspi->clk = devm_clk_get(&pdev->dev, NULL);
+	if (IS_ERR(qspi->clk)) {
+		if (PTR_ERR(qspi->clk) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+		dev_warn(dev, "unable to get clock using defaults\n");
+		qspi->clk = NULL;
+	}
+
 	master->bus_num = -1;
 	master->mode_bits = SPI_CPHA | SPI_CPOL | SPI_RX_DUAL | SPI_RX_QUAD;
 	master->setup = bcm_qspi_setup;
@@ -1373,12 +1381,6 @@ int bcm_qspi_probe(struct platform_device *pdev,
 		soc_intc->bcm_qspi_int_set(soc_intc, MSPI_DONE, true);
 	} else {
 		qspi->soc_intc = NULL;
-	}
-
-	qspi->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(qspi->clk)) {
-		dev_warn(dev, "unable to get clock using defaults\n");
-		qspi->clk = NULL;
 	}
 
 	if (qspi->clk) {

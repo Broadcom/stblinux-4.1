@@ -75,8 +75,7 @@
 	 0x3 << DMADATA_ENDIAN_SHIFT | 0x3 << PIODATA_ENDIAN_SHIFT)
 
 enum brcm_ahci_quirks {
-	BRCM_AHCI_QUIRK_NONCQ		= BIT(0),
-	BRCM_AHCI_QUIRK_SKIP_PHY_ENABLE	= BIT(1),
+	BRCM_AHCI_QUIRK_SKIP_PHY_ENABLE	= BIT(0),
 };
 
 struct brcm_ahci_priv {
@@ -400,6 +399,7 @@ static struct scsi_host_template ahci_platform_sht = {
 static int brcm_ahci_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
+	unsigned int hpriv_flags = 0;
 	struct brcm_ahci_priv *priv;
 	struct ahci_host_priv *hpriv;
 	struct resource *res;
@@ -417,6 +417,8 @@ static int brcm_ahci_probe(struct platform_device *pdev)
 
 	priv->clk = devm_clk_get(dev, "sw_sata3");
 	if (IS_ERR(priv->clk)) {
+		if (PTR_ERR(priv->clk) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
 		priv->clk = NULL;
 		pr_warn("failed to get sata clock\n");
 	}
@@ -424,7 +426,8 @@ static int brcm_ahci_probe(struct platform_device *pdev)
 	brcm_sata_clk_enable(priv);
 
 	if (of_device_is_compatible(dev->of_node, "brcm,bcm7425-ahci")) {
-		priv->quirks |= BRCM_AHCI_QUIRK_NONCQ;
+		hpriv_flags |= AHCI_HFLAG_NO_NCQ;
+		hpriv_flags |= AHCI_HFLAG_DELAY_ENGINE;
 		priv->quirks |= BRCM_AHCI_QUIRK_SKIP_PHY_ENABLE;
 	}
 
@@ -439,11 +442,10 @@ static int brcm_ahci_probe(struct platform_device *pdev)
 	hpriv = ahci_platform_get_resources(pdev);
 	if (IS_ERR(hpriv))
 		return PTR_ERR(hpriv);
+	hpriv->flags |= hpriv_flags;
 	hpriv->plat_data = priv;
 
 	brcm_sata_alpm_init(hpriv);
-	if (priv->quirks & BRCM_AHCI_QUIRK_NONCQ)
-		hpriv->flags |= AHCI_HFLAG_NO_NCQ;
 	hpriv->flags |= AHCI_HFLAG_NO_WRITE_TO_RO;
 
 	ret = ahci_platform_enable_resources(hpriv);

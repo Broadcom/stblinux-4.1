@@ -2144,6 +2144,14 @@ static int bcm_sysport_probe(struct platform_device *pdev)
 	/* Initialize private members */
 	priv = netdev_priv(dev);
 
+	priv->clk = devm_clk_get(&pdev->dev, "sw_sysport");
+	if (IS_ERR(priv->clk)) {
+		if (PTR_ERR(priv->clk) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+		dev_warn(&pdev->dev, "failed to request clock\n");
+		priv->clk = NULL;
+	}
+
 	/* Allocate number of TX rings */
 	priv->tx_rings = devm_kcalloc(&pdev->dev, txq,
 				      sizeof(struct bcm_sysport_tx_ring),
@@ -2219,12 +2227,6 @@ static int bcm_sysport_probe(struct platform_device *pdev)
 			       bcm_sysport_wol_isr, 0, dev->name, priv);
 	if (!ret)
 		device_set_wakeup_capable(&pdev->dev, 1);
-
-	priv->clk = devm_clk_get(&pdev->dev, "sw_sysport");
-	if (IS_ERR(priv->clk)) {
-		dev_warn(&pdev->dev, "failed to request clock\n");
-		priv->clk = NULL;
-	}
 
 	/* Set the needed headroom once and for all */
 	BUILD_BUG_ON(sizeof(struct bcm_tsb) != 8);

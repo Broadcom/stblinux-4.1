@@ -1353,6 +1353,19 @@ static int brcm_pcie_probe(struct platform_device *pdev)
 	pcie->dn = dn;
 	pcie->dev = &pdev->dev;
 
+	pcie->clk = of_clk_get_by_name(dn, "sw_pcie");
+	if (IS_ERR(pcie->clk)) {
+		if (PTR_ERR(pcie->clk) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+		dev_err(&pdev->dev, "could not get clock\n");
+		pcie->clk = NULL;
+	}
+	ret = clk_prepare_enable(pcie->clk);
+	if (ret) {
+		dev_err(&pdev->dev, "could not enable clock\n");
+		return ret;
+	}
+
 	INIT_LIST_HEAD(&pcie->pwr_supplies);
 	supplies = of_property_count_strings(dn, "supply-names");
 	if (supplies <= 0)
@@ -1388,16 +1401,6 @@ static int brcm_pcie_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	pcie->clk = of_clk_get_by_name(dn, "sw_pcie");
-	if (IS_ERR(pcie->clk)) {
-		dev_err(&pdev->dev, "could not get clock\n");
-		pcie->clk = NULL;
-	}
-	ret = clk_prepare_enable(pcie->clk);
-	if (ret) {
-		dev_err(&pdev->dev, "could not enable clock\n");
-		return ret;
-	}
 	pcie->base = base;
 	pcie->gen = 0;
 

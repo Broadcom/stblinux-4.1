@@ -783,6 +783,40 @@ static void r4k_dma_cache_inv(unsigned long addr, unsigned long size)
 	bc_inv(addr, size);
 	__sync();
 }
+
+/*
+ * used to flush read ahead cache prefetch lines after DMA from device
+ */
+static void r4k_dma_ra_cache_inv(unsigned long addr, unsigned long size)
+{
+	unsigned int linesz = cpu_scache_line_size();
+	unsigned long addr0 = addr, addr1;
+
+	if (current_cpu_type() != CPU_BMIPS5000)
+		return;
+
+	BUG_ON(size == 0);
+
+	addr0 &= ~(linesz - 1);
+	addr1 = (addr0 + size - 1) & ~(linesz - 1);
+
+	protected_writeback_scache_line(addr0);
+	if (likely(addr1 != addr0))
+		protected_writeback_scache_line(addr1);
+	else
+		return;
+
+	addr0 += linesz;
+	if (likely(addr1 != addr0))
+		protected_writeback_scache_line(addr0);
+	else
+		return;
+
+	addr1 -= linesz;
+	if (likely(addr1 > addr0))
+		protected_writeback_scache_line(addr0);
+
+}
 #endif /* CONFIG_DMA_NONCOHERENT || CONFIG_DMA_MAYBE_COHERENT */
 
 /*
@@ -871,6 +905,7 @@ static void r4k_flush_kernel_vmap_range(unsigned long vaddr, int size)
 }
 
 #ifdef CONFIG_BRCMSTB
+
 /*
  * Fine-grained cacheflush() syscall for usermode Nexus
  */
@@ -1770,10 +1805,12 @@ void r4k_cache_init(void)
 		_dma_cache_wback_inv	= (void *)cache_noop;
 		_dma_cache_wback	= (void *)cache_noop;
 		_dma_cache_inv		= (void *)cache_noop;
+		_dma_ra_cache_inv       = (void *)cache_noop;
 	} else {
 		_dma_cache_wback_inv	= r4k_dma_cache_wback_inv;
 		_dma_cache_wback	= r4k_dma_cache_wback_inv;
 		_dma_cache_inv		= r4k_dma_cache_inv;
+		_dma_ra_cache_inv       = r4k_dma_ra_cache_inv;
 	}
 #endif
 

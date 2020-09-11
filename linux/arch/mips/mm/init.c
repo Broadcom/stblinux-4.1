@@ -324,6 +324,10 @@ static inline void mem_init_free_highmem(void)
 	for (tmp = highstart_pfn; tmp < highend_pfn; tmp++) {
 		struct page *page = pfn_to_page(tmp);
 
+		/* Account for a potential holes in highmem */
+		if (!pfn_valid(tmp))
+			continue;
+
 		if (!page_is_ram(tmp) || memblock_is_reserved(PFN_PHYS(tmp)))
 			SetPageReserved(page);
 		else

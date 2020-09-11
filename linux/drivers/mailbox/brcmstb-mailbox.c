@@ -60,7 +60,7 @@ static struct mbox_chan_ops brcm_mbox_ops = {
 	.startup = brcm_mbox_startup,
 };
 
-static irqreturn_t brcm_isr(void)
+static irqreturn_t brcm_isr(int irq, void *data)
 {
 	mbox_chan_received_data(&chans[0], NULL);
 	return IRQ_HANDLED;
@@ -86,14 +86,10 @@ static int brcm_mbox_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	/* Get SGI interrupt number */
-	ret = of_property_read_u32_index(np, "interrupts", 1, &mbox->irq);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "failed to get SGI intr from DT\n");
-		return ret;
-	}
-
-	ret = set_ipi_handler(mbox->irq, brcm_isr,
-			      "brcm: EL3 to Linux SCMI reply msg");
+	mbox->irq = platform_get_irq(pdev, 0);
+	ret = devm_request_irq(&pdev->dev, mbox->irq, brcm_isr,
+			       IRQF_NO_SUSPEND,
+			      "brcm: EL3 to Linux SCMI reply msg", NULL);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to setup IPI isr\n");
 		return -EINVAL;
@@ -118,7 +114,6 @@ static int brcm_mbox_remove(struct platform_device *pdev)
 {
 	struct brcm_mbox *mbox = platform_get_drvdata(pdev);
 
-	clear_ipi_handler(mbox->irq);
 	mbox_controller_unregister(&mbox->mbox);
 	return 0;
 }

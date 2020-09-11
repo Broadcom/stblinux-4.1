@@ -175,6 +175,7 @@ config BMIPS_GENERIC
 	select PINCTRL_SINGLE
 	select SOC_BRCMSTB
 	select HARDIRQS_SW_RESEND
+	select ARCH_SPARSEMEM_ENABLE
 	help
 	  Build a generic DT-based kernel image that boots on select
 	  BCM33xx cable modem chips, BCM63xx DSL chips, and BCM7xxx set-top

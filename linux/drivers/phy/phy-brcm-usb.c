@@ -359,6 +359,8 @@ static int brcm_usb_phy_probe(struct platform_device *pdev)
 
 	priv->usb_20_clk = of_clk_get_by_name(dn, "sw_usb");
 	if (IS_ERR(priv->usb_20_clk)) {
+		if (PTR_ERR(priv->usb_20_clk) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
 		dev_err(&pdev->dev, "Clock not found in Device Tree\n");
 		priv->usb_20_clk = NULL;
 	}
@@ -370,6 +372,8 @@ static int brcm_usb_phy_probe(struct platform_device *pdev)
 	if (priv->has_xhci) {
 		priv->usb_30_clk = of_clk_get_by_name(dn, "sw_usb3");
 		if (IS_ERR(priv->usb_30_clk)) {
+			if (PTR_ERR(priv->usb_30_clk) == -EPROBE_DEFER)
+				return -EPROBE_DEFER;
 			/* Older device-trees are missing this clock */
 			dev_info(&pdev->dev,
 				"USB3.0 clock not found in Device Tree\n");

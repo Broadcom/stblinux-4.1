@@ -102,25 +102,19 @@ enum sata_mdio_phy_regs {
 	RXPMD_RX_FREQ_MON_CONTROL1		= 0x87,
 };
 
-static inline void __iomem *brcm_sata_phy_base(struct brcm_sata_port *port)
-{
-	struct brcm_sata_phy *priv = port->phy_priv;
-	u32 offset = 0;
-
-	if (priv->version == BRCM_SATA_PHY_28NM)
-		offset = SATA_MDIO_REG_28NM_SPACE_SIZE;
-	else if (priv->version == BRCM_SATA_PHY_40NM)
-		offset = SATA_MDIO_REG_40NM_SPACE_SIZE;
-	else
-		dev_err(priv->dev, "should not happen\n");
-
-	return priv->phy_base + (port->portnum * offset);
-}
-
-static void brcm_sata_mdio_wr(void __iomem *addr, u32 bank, u32 ofs,
+static void brcm_sata_mdio_wr(struct brcm_sata_port *port, u32 bank, u32 ofs,
 			      u32 msk, u32 value)
 {
+	struct brcm_sata_phy *priv = port->phy_priv;
+	void __iomem *addr = priv->phy_base;
 	u32 tmp;
+
+	if (priv->version == BRCM_SATA_PHY_28NM)
+		addr += (port->portnum * SATA_MDIO_REG_28NM_SPACE_SIZE);
+	else if (priv->version == BRCM_SATA_PHY_40NM)
+		bank += (port->portnum * SATA_MDIO_REG_40NM_SPACE_SIZE);
+	else
+		return;
 
 	writel(bank, addr + SATA_MDIO_BANK_OFFSET);
 	tmp = readl(addr + SATA_MDIO_REG_OFFSET(ofs));
@@ -135,16 +129,15 @@ static void brcm_sata_mdio_wr(void __iomem *addr, u32 bank, u32 ofs,
 
 static void brcm_sata_cfg_ssc(struct brcm_sata_port *port)
 {
-	void __iomem *base = brcm_sata_phy_base(port);
 	struct brcm_sata_phy *priv = port->phy_priv;
 	u32 tmp;
 
 	/* override the TX spread spectrum setting */
 	tmp = TXPMD_CONTROL1_TX_SSC_EN_FRC_VAL | TXPMD_CONTROL1_TX_SSC_EN_FRC;
-	brcm_sata_mdio_wr(base, TXPMD_REG_BANK, TXPMD_CONTROL1, ~tmp, tmp);
+	brcm_sata_mdio_wr(port, TXPMD_REG_BANK, TXPMD_CONTROL1, ~tmp, tmp);
 
 	/* set fixed min freq */
-	brcm_sata_mdio_wr(base, TXPMD_REG_BANK, TXPMD_TX_FREQ_CTRL_CONTROL2,
+	brcm_sata_mdio_wr(port, TXPMD_REG_BANK, TXPMD_TX_FREQ_CTRL_CONTROL2,
 			  ~TXPMD_TX_FREQ_CTRL_CONTROL2_FMIN_MASK,
 			  FMIN_VAL_DEFAULT);
 
@@ -156,7 +149,7 @@ static void brcm_sata_cfg_ssc(struct brcm_sata_port *port)
 		tmp = FMAX_VAL_DEFAULT;
 	}
 
-	brcm_sata_mdio_wr(base, TXPMD_REG_BANK, TXPMD_TX_FREQ_CTRL_CONTROL3,
+	brcm_sata_mdio_wr(port, TXPMD_REG_BANK, TXPMD_TX_FREQ_CTRL_CONTROL3,
 			  ~TXPMD_TX_FREQ_CTRL_CONTROL3_FMAX_MASK, tmp);
 }
 
@@ -165,7 +158,6 @@ static void brcm_sata_cfg_ssc(struct brcm_sata_port *port)
 
 static int brcm_stb_sata_rxaeq_init(struct brcm_sata_port *port)
 {
-	void __iomem *base = brcm_sata_phy_base(port);
 	u32 tmp = 0, reg = 0;
 
 	switch (port->rxaeq_mode) {
@@ -186,18 +178,17 @@ static int brcm_stb_sata_rxaeq_init(struct brcm_sata_port *port)
 		break;
 	}
 
-	brcm_sata_mdio_wr(base, AEQRX_REG_BANK_0, reg, ~tmp, tmp);
-	brcm_sata_mdio_wr(base, AEQRX_REG_BANK_1, reg, ~tmp, tmp);
+	brcm_sata_mdio_wr(port, AEQRX_REG_BANK_0, reg, ~tmp, tmp);
+	brcm_sata_mdio_wr(port, AEQRX_REG_BANK_1, reg, ~tmp, tmp);
 
 	return 0;
 }
 
 static void brcm_stb_sata_calibrate(struct brcm_sata_port *port)
 {
-	void __iomem *base = brcm_sata_phy_base(port);
 	u32 tmp = BIT(8);
 
-	brcm_sata_mdio_wr(base, RXPMD_REG_BANK, RXPMD_RX_FREQ_MON_CONTROL1,
+	brcm_sata_mdio_wr(port, RXPMD_REG_BANK, RXPMD_RX_FREQ_MON_CONTROL1,
 			  ~tmp, tmp);
 }
 
